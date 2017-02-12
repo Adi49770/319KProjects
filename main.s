@@ -44,23 +44,22 @@ SYSCTL_RCGCGPIO_R  EQU 0x400FE608
        AREA    |.text|, CODE, READONLY, ALIGN=2
        THUMB
        EXPORT  Start
+
 Start
- ; TExaS_Init sets bus clock at 80 MHz
+
+; TExaS_Init sets bus clock at 80 MHz
       BL  TExaS_Init ; voltmeter, scope on PD3
       CPSIE  I    ; TExaS voltmeter, scope runs on interrupts
 	  ;Initialize the clock and other port
+
+	 ;NOP
 	  LDR R0, =SYSCTL_RCGCGPIO_R
 	  LDR R1, [R0]
-	  ORR R1, #0x20
+	  ORR R1, #0x30
+	  STR R1, [R0]
 	  NOP
 	  NOP
 	  ;2 bus cycles
-	  ;Unlock PUR
-	  LDR R0, =GPIO_PORTF_PUR_R
-	  MOV R1, #0x11
-	  STR R1, [R0]
-;	  LDR R0, =GPIO_PORTE_PUR_R
-	 ; STR R1, [R0]
 	  ; AFSEL
 	  LDR R0,=GPIO_PORTE_AFSEL_R
 	  AND R1, #0
@@ -76,7 +75,11 @@ Start
 	  LDR R1, [R0]
 	  ORR R1, #0x1F
 	  STR R1, [R0]
-	  ; set directon
+	  ;Unlock PUR
+	  LDR R0, =GPIO_PORTF_PUR_R
+	  MOV R1, #0x11
+	  STR R1, [R0]
+; set directon
 	  LDR R0, =GPIO_PORTE_DIR_R
 	  LDR R1, [R0]
 	  ORR R1, #0x01 ;PE0 is the ourput, the rest are o and input?
@@ -85,72 +88,105 @@ Start
 	  LDR R1, [R0]
 	  AND R1, #0xE0	;make sure the check this one out as well
 	  STR R1, [R0]
-	  ;As of right now, the directions given should be set according to the inputs and outputs
-times SPACE 1;
-ButtonPressed	SPACE 1
-LOOPER SPACE 1
-	  
+;times SPACE 1 --> R8
+;ButtonPressed SPACE 1 --R9
+;LOOPER SPACE 1	  --> R10
+	  NOP
+	  AND R9, #0
+	  ;LDR R4, ButtonPressed
+	  ;STR R5, [R4] ;the initial value of ButtonPressed is 0 
+	  ;LDR R4, LOOPER
+	  MOV R10, #25
+	  ;STR R5, [R4] ;put #25 into LOOPER
 
 loop  LDR R0, =GPIO_PORTE_DATA_R ; receive the data given by PORT E
 ;R4 and R5 are dummy registers 
 		
-	  
+	  MOV R4, R9
 	  LDR R1, [R0]
-	  AND R2, R1, #0x01 ;isolate bit for PE0 to see if the switch is pressed or not based on positive logic
-	  SUB R2, #0x1
-	  ;branch if zero to tunroff led and loop back to "loop"
+	  AND R2, R1, #0x02 ;isolate bit for PE1 to see if the switch is pressed or not based on positive logic
+	  CMP R2, #0x02
+	  BNE next
+	  BL BUTTONPRESSED
+next
+	  ;LDR R4, LOOPER
+	  CMP R4, #5
+	  BEQ SWITCHOFF
+	  MOV R6, R10
+	  MOV R5, R9
+	  ;LDR R5, [R5]
+	  MOV R7, #25
+	  MUL R5, R5, R7	;get the amount of machine cyles needed for the LED
+	  ADD R5, R6
+	  MOV R9, R5 ;store back the needed value back into LOOPER
+	  
 	 ;set the value of LOOPER based on the number of buttons pressed
 	  ORR R1, #0x01	;turn on LED
 	  STR R1, [R0]
-	  LDR R5, times
+	  MOV R5, R8
 	  ;LDR R5, [R5]
-	  LDR R4, LOOPER
-	  LDR R4, [R4]
-	  STR R4, [R5]
-turnonloop
-	  ;call the timer loop
-	  LDR R5, times
-	  LDR R4, [R5]
+	  MOV R4, R10 ; LDR R4, LOOPER
+	  ;LDR R4, [R4]
+	  MOV R8, R10 ;STR R4, [R5] ;store the value of LOOPER into times (I know, its a bit redudant but oh well)
+TurnOnLoop
+	  BL TIMER ;call the TIMER loop to kill time and machine cycles 
+	  MOV R5, R8 ;LDR R5, times
+	  MOV R4, R5 ;LDR R4, [R5]
 	  SUB R4, #1
-	  STR R4, [R5]
-	  ;branch back if positve
+	  MOV R8, R4 ;STR R4, [R5]
+	  CMP R4, #0x00
+	  BPL TurnOnLoop ;branch back if positve or zero
+	  
 	  AND R1, #0x1E	;turn off LED
-	  ADD R4, #100
-	  LDR R5, LOOPER
-	  LDR R5, [R5]
-	  SUB R4, R5
-	  LDR R5, times
-	  STR R4, [R5]
+	  STR R1, [R0]
+	  MOV R4, #125
+	  MOV R5, R10 ;LDR R5, LOOPER
+	  ;LDR R5, [R5]
+	  SUB R4, R5 ;125 - LOOPER
+	  ;LDR R5, times
+	  MOV R8, R4 ;STR R4, [R5] --> store 125- LOOPER into times (100 for no button pressed) we may have to calibrate these values 
+	  
 TurnOffLoop
-	  ;call the timer loop
-	  LDR R5, times
-	  LDR R4, [R5]
+	  BL TIMER ;call the timer loop to kill time and machine cycles
+	  MOV R5, R8 ;LDR R5, times
+	  MOV R4, R5 ;LDR R4, [R5]
 	  SUB R4, #1
-	  STR R4, [R5]
-	  ;branch back if positive
+	  MOV R8, R4 ;STR R4, [R5]
+	  CMP R4, #0x00
+	  BPL TurnOffLoop;branch back if positive or zero
 	  
 	  B    loop
 	  ;;;;;;;;;;;;;;;buttonpressed Method;;;
-	  AND R1, #0x1E
+BUTTONPRESSED
+	  
+	  AND R1, #0x1E ;turn off the LED
 	  MOV R4, #1
-	  LDR R5, ButtonPressed
-	  LDR R5, [R5]
+	  MOV R5, R9 ;LDR R5, ButtonPressed
+	  ;LDR R5, [R5]
 	  ADD R4, R5
-	  STR R4, [R5]
+	  MOV R9, R4 ;STR R4, [R5] ; increment the value of ButtonPressed by 1
+	  AND R1, #0x1D ;turn off the bit to the switch to avoid redundancy
+	  STR R1, [R0]
+	  BX LR	;return
 
 
 
 ;;;;;;;;;;;;;;TIMER LOOP;;;;;;;;;;;;
-Timer
+TIMER
 		MOV R5, #16
 DLoop
 		MOV R4, #1000
 DLoop1
-		SUB R4, #1
-		BNE DLoop1
-		SUB R5, #1
-		BNE DLoop
-		;loop and Timer subrountine ended. Branch back
+		SUBS R4, #1
+		BPL DLoop1
+		SUBS R5, #1
+		BPL DLoop
+		BX LR ;return
+		;;;;;;;;;;;;;;;SWITCHOFF;;;;;
+SWITCHOFF
+		AND R1, #0x1E
+		STR R1, [R0]
+		B loop
 		
 	  
 
